@@ -8,4 +8,4 @@ SafeLoader is a reusable Python module for:
 
 ## Installation
 ```bash
-pip install safe-loader
+pip install py-safe-loader
