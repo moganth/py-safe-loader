@@ -114,6 +114,7 @@ MIT License - see [LICENSE](py_safe_loader/src/py_safe_loader/LICENSE) file for 
 ## 👤 Author
 
 **Moganthkumar**
+**Lokesh Gopinath K**
 
 ---
 
