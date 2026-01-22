@@ -438,7 +438,7 @@ This project is licensed under the MIT License - see the [LICENSE](py_safe_loade
 ## 👤 Author
 
 **Moganthkumar**
-- Email: moganthkumar24405@gmail.com
+- Email: Raise PR
 
 ## 🙏 Acknowledgments
 
