@@ -98,7 +98,9 @@ if not success:
 
 [**Learn more about when to use →**](docs/guides/use-cases.md)
 
-## 🤝 Contributing
+## 🤝 Contributing 
+
+- [Read the Contributing Guidelines](CONTRIBUTING.md)
 
 Contributions are welcome! Feel free to:
 - Report bugs
