@@ -96,7 +96,7 @@ def greet(name):
 result = greet("SafeLoader")
 """
 
-success, namespace, error = loader.safe_exec_code(code1)
+success, namespace, error = loader.sandboxed_exec("Code Execution Test", code1)
 if success:
     print(f"Executed code result: {namespace.get('result')}")
 
@@ -106,7 +106,7 @@ def broken_function(
     print("This has syntax error")
 """
 
-success, namespace, error = loader.safe_exec_code(code2)
+success, namespace, error = loader.sandboxed_exec("Syntax Error Test", code2)
 # Program continues despite syntax error!
 
 
@@ -258,3 +258,45 @@ with SafeLoader(verbose=True, log_file='my_app_errors.log') as logged_loader:
     logged_loader.safe_execute(failing_function)
 
 print("Check 'my_app_errors.log' for detailed error logs!")
+
+# ============================================================================
+# EXAMPLE 10: Sandboxed Code Execution
+# ============================================================================
+print("\n\n10. SANDBOXED CODE EXECUTION (SECURITY TEST)")
+print("-" * 60)
+
+# Initialize SafeLoader for sandbox testing
+with SafeLoader(verbose=False) as sandbox_loader:
+
+    # --- TEST 1: Legitimate Logic (Should Pass) ---
+    valid_code = """
+x = 10
+y = 20
+result = sum([x, y, 30])
+print(f'Sandbox Calculation: {result}')
+"""
+    success, res, err = sandbox_loader.sandboxed_exec("Math & Logic Check", valid_code)
+    if success:
+        print(f"Test 1 PASSED. Result in Namespace: {res.get('result')}")
+
+    # --- TEST 2: Attempting to Import (Should be Blocked) ---
+    malicious_code = """
+import os
+print(os.getcwd())
+"""
+    success, res, err = sandbox_loader.sandboxed_exec("Restricted Import Check", malicious_code)
+    # The output of this call will automatically show the "RESULT: ❌ BLOCKED" format
+
+    # --- TEST 3: Attempting to Open File (Should be Blocked) ---
+    io_code = """
+with open('secrets.txt', 'w') as f:
+    f.write('pwned')
+"""
+    # Test with allow_io=False (default)
+    success, res, err = sandbox_loader.sandboxed_exec("File System Protection", io_code, allow_io=False)
+
+    # Final Summary for Example 10
+    print("\n--- Final Security Audit Table ---")
+    sandbox_loader.print_summary()
+
+print("Example 10 Completed. Notice how the program didn't crash during malicious attempts!")

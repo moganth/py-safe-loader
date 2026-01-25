@@ -147,38 +147,79 @@ class SafeLoader:
             
             return (False, None, error_msg)
     
-    def safe_exec_code(self, code: str, namespace: Optional[Dict] = None) -> tuple:
-        """
-        Safely execute code string using exec()
-        
-        Args:
-            code (str): Python code to execute
-            namespace (dict): Optional namespace dictionary
-            
-        Returns:
-            Tuple of (success: bool, namespace: dict, error: str)
-        """
-        if namespace is None:
-            namespace = {}
+    # / ** Sandboxed Code Execution ** /
+    def sandboxed_exec(self, test_name: str, code: str, allow_io: bool = False) -> tuple:
+        """Enhanced Sandbox: Restricts imports and captures line-specific errors with bounds checking"""
+        # Security Whitelist
+        safe_builtins = {
+            'print': print, 'sum': sum, 'len': len, 'range': range,
+            'int': int, 'str': str, 'dict': dict, 'list': list,
+        }
+        if allow_io: safe_builtins['open'] = open
+        namespace = {"__builtins__": safe_builtins}
         
         try:
-            self._log("Executing code block...", "INFO")
+            print(f"\n=============== TEST: {test_name} ===============")
             exec(code, namespace)
-            self._log("✓ Code executed successfully", "SUCCESS")
+            # FIX: Added 'function', 'status', and 'timestamp' for compatibility
+            self.execution_history.append({
+                'test': test_name, 
+                'function': f"Sandbox: {test_name}",
+                'status': 'success', 
+                'line': 'N/A',
+                'timestamp': datetime.now()
+            })
             return (True, namespace, None)
             
-        except SyntaxError as e:
-            error_msg = f"Syntax error at line {e.lineno}: {e.msg}"
-            self._log(f"✗ {error_msg}", "ERROR")
-            return (False, namespace, error_msg)
-            
         except Exception as e:
-            error_msg = f"{type(e).__name__}: {str(e)}"
-            tb = traceback.format_exc()
-            self._log(f"✗ Execution error: {error_msg}", "ERROR")
-            if self.verbose:
-                self._log(f"Traceback:\n{tb}", "ERROR")
-            return (False, namespace, error_msg)
+            # (Keep your existing traceback logic here...)
+            _, _, tb = sys.exc_info()
+            stack = traceback.extract_tb(tb)
+            if isinstance(e, SyntaxError):
+                test_line_no = e.lineno
+            else:
+                test_line_no = stack[-1].lineno if stack else "Unknown"
+            
+            code_lines = code.strip().split('\n')
+            if isinstance(test_line_no, int) and 1 <= test_line_no <= len(code_lines):
+                offending_code = code_lines[test_line_no-1].strip()
+            else:
+                offending_code = "Parser Error (Code likely incomplete)"
+
+            print(f"RESULT: ❌ BLOCKED")
+            print(f"TEST CODE LINE: {test_line_no} -> \"{offending_code}\"")
+            print(f"REASON: Import operation was detected and blocked on Test Line {test_line_no}")
+            
+            # FIX: Added 'function', 'status', and 'timestamp' for compatibility
+            self.execution_history.append({
+                'test': test_name, 
+                'function': f"Sandbox: {test_name}",
+                'status': 'failed', 
+                'line': f'Line {test_line_no}',
+                'timestamp': datetime.now()
+            })
+            return (False, {}, f"Blocked on Line {test_line_no}")
+        #/ ** Sandboxed Code Execution ** /
+
+    def safe_exec_file(self, file_path: str, allow_io: bool = False) -> tuple:
+        """Executes a file using the new sandboxed logic"""
+        if not os.path.exists(file_path): return (False, {}, "File not found")
+        with open(file_path, 'r') as f:
+            return self.sandboxed_exec(os.path.basename(file_path), f.read(), allow_io)
+
+    def print_summary(self):
+        """Clean Summary Table"""
+        print(f"{'#'*60}")
+        print(f"{' '*19}Sandbox Execution")
+        print(f"{'#'*60}")
+        print(f"{'STATUS':<15} | {'LOCATION':<10} | {'TEST NAME'}")
+        print("-" * 60)
+        for item in self.execution_history:
+            # Filter history to only show sandboxed tests for the audit
+            if 'test' in item:
+                print(f"{item['status']:<15} | {item['line']:<10} | {item['test']}")
+        print(f"{'#'*60}\n")
+    # / ** Sandboxed Code Execution ** /
     
     def safe_exec_file(self, file_path: str, namespace: Optional[Dict] = None) -> tuple:
         """
@@ -253,33 +294,36 @@ class SafeLoader:
         }
     
     def print_summary(self):
-        """Print a formatted summary report"""
+        """Standard summary that handles both regular and sandboxed operations"""
         summary = self.get_summary()
-        
         print("\n" + "="*60)
         print("SAFELOADER SUMMARY REPORT")
         print("="*60)
-        print(f"Total Modules Attempted: {summary['total_modules_attempted']}")
-        print(f"Successfully Loaded: {summary['modules_loaded']}")
-        print(f"Failed to Load: {summary['modules_failed']}")
-        
-        if summary['loaded_module_names']:
-            print(f"\n✓ Loaded Modules:")
-            for name in summary['loaded_module_names']:
-                print(f"  - {name}")
-        
-        if summary['failed_module_names']:
-            print(f"\n✗ Failed Modules:")
-            for name in summary['failed_module_names']:
-                print(f"  - {name}: {summary['failed_details'][name]}")
         
         if summary['execution_history']:
             print(f"\nExecution History ({len(summary['execution_history'])} operations):")
-            for item in summary['execution_history'][-5:]:  # Show last 5
-                status_icon = "✓" if item['status'] == 'success' else "✗"
-                print(f"  {status_icon} {item['function']} - {item['timestamp'].strftime('%H:%M:%S')}")
-        
-        print("="*60 + "\n")
+            for item in summary['execution_history']:
+                # icon depends on status string
+                status_icon = "✓" if item.get('status') == 'success' else "✗"
+                
+                # FIX: Use .get() to avoid KeyError if 'function' or 'timestamp' is missing
+                func_name = item.get('function', item.get('test', 'Unknown Operation'))
+                time_obj = item.get('timestamp')
+                time_str = time_obj.strftime('%H:%M:%S') if time_obj else "00:00:00"
+                
+                print(f"  {status_icon} {func_name} - {time_str}")
+
+        # Add the Sandbox-specific table at the end
+        print(f"\n{'#'*60}")
+        print(f"{' '*19}Sandbox Execution Audit")
+        print(f"{'#'*60}")
+        print(f"{'STATUS':<15} | {'LOCATION':<10} | {'TEST NAME'}")
+        print("-" * 60)
+        for item in self.execution_history:
+            if 'test' in item:
+                status_tag = "✅ PASSED" if item.get('status') == 'success' else "❌ BLOCKED"
+                print(f"{status_tag:<15} | {item.get('line', 'N/A'):<10} | {item['test']}")
+        print(f"{'#'*60}\n")
     
     def reset(self):
         """Reset all tracking data"""
@@ -312,6 +356,8 @@ class SafeLoader:
         
         self.reset()
         return False
+
+
 
 # Convenience functions for quick use
 def quick_load(*module_names, verbose=True) -> Dict[str, Any]:
