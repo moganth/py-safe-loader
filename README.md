@@ -119,3 +119,4 @@ MIT License - see [LICENSE](py_safe_loader/src/py_safe_loader/LICENSE) file for 
 ---
 
 **Made with Python 🐍 | Never crash again! 🛡️**
+
