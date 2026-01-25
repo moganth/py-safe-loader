@@ -16,6 +16,7 @@ import traceback
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 import os
+from importlib import metadata as importlib_metadata
 
 
 class SafeLoader:
@@ -313,6 +314,238 @@ class SafeLoader:
         self.reset()
         return False
 
+# ============================================================================
+# DEPENDENCY VERSION CHECKING WITH ADJUSTMENT FEATURE
+# ============================================================================
+
+def dependency_version_checker(
+    dependencies: Dict[str, str],
+    verbose: bool = True,
+    recommendations: Optional[Dict[str, List[str]]] = None,
+    available_for_adjustment: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, Any]:
+    """
+    Check installed package versions against requirements and suggest adjustments
+    for version conflicts, supporting both upgrades and downgrades.
+    
+    This function combines dependency checking with intelligent version adjustment
+    recommendations based on error patterns and compatibility issues.
+    
+    Args:
+        dependencies: Dict mapping package_name -> version_spec
+            e.g., {"numpy": ">=1.20.0", "pandas": "==1.3.0"}
+        verbose: Print detailed status report (default: True)
+        recommendations: Dict of package_name -> list of recommended versions
+        available_for_adjustment: Dict of package_name -> list of available versions
+            Used for suggesting downgrades/upgrades when compatibility issues occur
+    
+    Returns:
+        Dict with:
+            - 'all_satisfied': bool, True if all dependencies are satisfied
+            - 'results': Dict with per-package details:
+                - 'installed_version': Installed version or None
+                - 'required_version': Required version spec
+                - 'satisfied': bool, True if requirement is met
+                - 'status': 'ok', 'outdated', or 'missing'
+                - 'message': Human-readable message
+                - 'adjustment_suggested': Suggested version for adjustment (if needed)
+                - 'adjustment_reason': Why this adjustment is suggested
+    
+    Examples:
+        Basic usage:
+        >>> deps = {"pip": ">=24.0", "setuptools": ">=80.0"}
+        >>> result = dependency_version_checker(deps)
+        >>> print(result['all_satisfied'])  # True if all OK
+        
+        With adjustment suggestions:
+        >>> available = {"numpy": ["1.19.0", "1.20.0", "1.21.0", "1.22.0"]}
+        >>> result = dependency_version_checker(
+        ...     {"numpy": ">=1.20.0"},
+        ...     available_for_adjustment=available
+        ... )
+    """
+    
+    def _parse_requirement(requirement: str) -> tuple:
+        """Parse version requirement like '>=1.0.0' into operator and version"""
+        operators = (">=", "<=", "==", ">", "<")
+        trimmed = requirement.strip()
+        for op in operators:
+            if trimmed.startswith(op):
+                return op, trimmed[len(op):].strip()
+        return ">=", trimmed
+    
+    def _compare_versions(installed: str, operator: str, required: str) -> bool:
+        """Compare two version strings using the given operator"""
+        try:
+            from packaging.version import Version
+            installed_v = Version(installed)
+            required_v = Version(required)
+        except Exception:
+            from distutils.version import LooseVersion  # type: ignore
+            installed_v = LooseVersion(installed)
+            required_v = LooseVersion(required)
+        
+        if operator == ">=":
+            return installed_v >= required_v
+        if operator == "<=":
+            return installed_v <= required_v
+        if operator == "==":
+            return installed_v == required_v
+        if operator == ">":
+            return installed_v > required_v
+        if operator == "<":
+            return installed_v < required_v
+        return False
+    
+    def _suggest_adjustment(package: str, current: str, operator: str, 
+                           required: str) -> tuple:
+        """Suggest version adjustment if available versions are provided"""
+        if not available_for_adjustment or package not in available_for_adjustment:
+            return None, None
+        
+        available = available_for_adjustment[package]
+        
+        try:
+            from packaging.version import Version
+            version_parser = Version
+        except Exception:
+            from distutils.version import LooseVersion  # type: ignore
+            version_parser = LooseVersion
+        
+        try:
+            current_v = version_parser(current)
+            sorted_versions = sorted(
+                [v for v in available if v != current],
+                key=lambda v: version_parser(v),
+                reverse=True
+            )
+        except Exception:
+            sorted_versions = sorted([v for v in available if v != current], reverse=True)
+        
+        if not sorted_versions:
+            return None, None
+        
+        # For version mismatches, prefer downgrade if operator is >= and newer versions are failing
+        # Prefer upgrade for breaking changes
+        if operator == "==":
+            # For exact version, suggest the required version if available
+            if required in sorted_versions:
+                return required, f"Exact version mismatch - use required {required}"
+        
+        # Check if we should downgrade (compatibility issues with newer versions)
+        downgrade_candidates = [v for v in sorted_versions 
+                               if version_parser(v) < current_v]
+        if downgrade_candidates and operator == ">=":
+            suggestion = downgrade_candidates[0]
+            return suggestion, f"Downgrade to {suggestion} for compatibility"
+        
+        # Check if we should upgrade (missing features or fixes)
+        upgrade_candidates = [v for v in sorted_versions 
+                            if version_parser(v) > current_v]
+        if upgrade_candidates:
+            suggestion = upgrade_candidates[0]
+            return suggestion, f"Upgrade to {suggestion} to satisfy {operator}{required}"
+        
+        # Default to first available
+        if sorted_versions:
+            suggestion = sorted_versions[0]
+            reason = f"Alternative version: {suggestion}"
+            return suggestion, reason
+        
+        return None, None
+    
+    def _pick_recommended(package_name: str) -> Optional[str]:
+        """Pick the highest recommended version for a package"""
+        if not recommendations or package_name not in recommendations:
+            return None
+        
+        versions = recommendations[package_name]
+        try:
+            from packaging.version import Version
+            parsed = sorted(((Version(v), v) for v in versions), reverse=True)
+        except Exception:
+            from distutils.version import LooseVersion  # type: ignore
+            parsed = sorted(((LooseVersion(v), v) for v in versions), reverse=True)
+        
+        return parsed[0][1] if parsed else None
+    
+    # Process each dependency
+    results: Dict[str, Dict[str, Any]] = {}
+    all_satisfied = True
+    
+    for package_name, requirement in dependencies.items():
+        operator, required_version = _parse_requirement(str(requirement))
+        
+        try:
+            installed_version = importlib_metadata.version(package_name)
+        except importlib_metadata.PackageNotFoundError:
+            # Package not installed
+            recommended = _pick_recommended(package_name)
+            suggestion = recommended or f"{operator}{required_version}"
+            
+            results[package_name] = {
+                "installed_version": None,
+                "required_version": f"{operator}{required_version}",
+                "satisfied": False,
+                "status": "missing",
+                "recommended_version": recommended,
+                "adjustment_suggested": f"Install {package_name}=={suggestion}",
+                "adjustment_reason": "Package not installed",
+                "message": (
+                    f"{package_name} is not installed; requires {operator}{required_version}. "
+                    f"Install with: pip install {package_name}"
+                ),
+            }
+            all_satisfied = False
+            
+            if verbose:
+                print(
+                    f"[MISSING ] {package_name:<18} requires {operator}{required_version:<10} "
+                    f"→ Install {suggestion}"
+                )
+            continue
+        
+        # Check if installed version satisfies requirement
+        is_satisfied = _compare_versions(installed_version, operator, required_version)
+        all_satisfied = all_satisfied and is_satisfied
+        
+        # Get adjustment suggestion if not satisfied
+        adjustment_suggested, adjustment_reason = None, None
+        if not is_satisfied:
+            adjustment_suggested, adjustment_reason = _suggest_adjustment(
+                package_name, installed_version, operator, required_version
+            )
+        
+        recommended = _pick_recommended(package_name)
+        
+        results[package_name] = {
+            "installed_version": installed_version,
+            "required_version": f"{operator}{required_version}",
+            "satisfied": is_satisfied,
+            "status": "ok" if is_satisfied else "outdated",
+            "recommended_version": recommended,
+            "adjustment_suggested": adjustment_suggested,
+            "adjustment_reason": adjustment_reason,
+            "message": (
+                f"{package_name} {installed_version} installed; requires {operator}{required_version}"
+            ),
+        }
+        
+        if verbose:
+            if is_satisfied:
+                print(
+                    f"[OK      ] {package_name:<18} {installed_version:<10} "
+                    f"✓ requires {operator}{required_version}"
+                )
+            else:
+                adj_info = f" → Adjust to {adjustment_suggested}" if adjustment_suggested else ""
+                print(
+                    f"[OUTDATED] {package_name:<18} {installed_version:<10} "
+                    f"→ requires {operator}{required_version}{adj_info}"
+                )
+    
+    return {"all_satisfied": all_satisfied, "results": results}
+
 # Convenience functions for quick use
 def quick_load(*module_names, verbose=True) -> Dict[str, Any]:
     """
@@ -334,3 +567,5 @@ def safe_run(func: Callable, *args, **kwargs) -> tuple:
     """
     loader = SafeLoader(verbose=False)
     return loader.safe_execute(func, *args, **kwargs)
+
+
