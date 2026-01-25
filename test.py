@@ -67,7 +67,7 @@ def risky_division(a, b):
 
 def buggy_function():
     """This will definitely crash"""
-    return undefined_variable + 10
+    return undefined_variable + 10 # type: ignore
 
 with SafeLoader(verbose=True) as exec_loader:
     # Execute risky functions safely
