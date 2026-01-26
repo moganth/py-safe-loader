@@ -13,6 +13,7 @@ Usage:
 import importlib
 import sys
 import traceback
+import re
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 import os
@@ -150,7 +151,10 @@ class SafeLoader:
     
     def safe_exec_code(self, code: str, namespace: Optional[Dict] = None) -> tuple:
         """
-        Safely execute code string using exec()
+        Safely execute code string using exec() with non-blocking security scanners:
+        - Obfuscation Detector: Warns about evasion patterns (base64, excessive dunders)
+        - Behavioral Detector: Warns about runtime file/network access attempts
+        - Output Guardian: Warns about large outputs or potential secret leakage
         
         Args:
             code (str): Python code to execute
@@ -159,6 +163,51 @@ class SafeLoader:
         Returns:
             Tuple of (success: bool, namespace: dict, error: str)
         """
+        # ==================== LAYER 1: OBFUSCATION DETECTOR (STATIC SCAN - NON-BLOCKING) ====================
+        obfuscation_warnings = []
+        
+        # Base64/encoding evasion patterns
+        if re.search(r'base64\.b64decode|exec\(|eval\(|compile\(|__import__', code, re.IGNORECASE):
+            obfuscation_warnings.append("Base64/exec/eval patterns detected (potential evasion attempt)")
+        
+        # Excessive dunder attributes (introspection probing)
+        dunder_count = code.count('__')
+        if dunder_count > 8 and 'class' not in code and 'def' not in code:
+            obfuscation_warnings.append(f"Excessive dunder attributes ({dunder_count} occurrences) - introspection probing?")
+        
+        # Long obfuscated strings (hex/unicode encoding)
+        if re.search(r'\\x[0-9a-f]{2}|\\u[0-9a-f]{4}', code) and len(code) < 200:
+            obfuscation_warnings.append("Hex/unicode escape sequences detected (possible obfuscation)")
+        
+        # Report obfuscation warnings
+        for warning in obfuscation_warnings:
+            self._log(f"⚠️ OBFUSCATION WARNING: {warning}", "SECURITY")
+        
+        # ==================== LAYER 2: BEHAVIORAL DETECTOR (RUNTIME TRACING) ====================
+        behavioral_flags = {
+            'file_access': False,
+            'network_access': False,
+            'introspection': False
+        }
+        
+        def trace_behavior(frame, event, arg):
+            if event == 'call':
+                func_name = frame.f_code.co_name.lower()
+                # Detect file operations
+                if any(kw in func_name for kw in ['open', 'read', 'write', 'file', 'path']):
+                    behavioral_flags['file_access'] = True
+                # Detect network operations
+                if any(kw in func_name for kw in ['socket', 'connect', 'request', 'urlopen', 'get', 'post']):
+                    behavioral_flags['network_access'] = True
+                # Detect introspection
+                if any(kw in func_name for kw in ['globals', 'locals', 'dir', 'getattr', 'setattr', 'vars']):
+                    behavioral_flags['introspection'] = True
+            return trace_behavior
+        
+        # Enable tracing before execution
+        original_trace = sys.gettrace()
+        sys.settrace(trace_behavior)
+        
         if namespace is None:
             namespace = {}
         
@@ -166,20 +215,58 @@ class SafeLoader:
             self._log("Executing code block...", "INFO")
             exec(code, namespace)
             self._log("✓ Code executed successfully", "SUCCESS")
-            return (True, namespace, None)
-            
         except SyntaxError as e:
             error_msg = f"Syntax error at line {e.lineno}: {e.msg}"
             self._log(f"✗ {error_msg}", "ERROR")
+            # Restore trace before returning
+            sys.settrace(original_trace)
             return (False, namespace, error_msg)
-            
         except Exception as e:
             error_msg = f"{type(e).__name__}: {str(e)}"
             tb = traceback.format_exc()
             self._log(f"✗ Execution error: {error_msg}", "ERROR")
             if self.verbose:
                 self._log(f"Traceback:\n{tb}", "ERROR")
+            # Restore trace before returning
+            sys.settrace(original_trace)
             return (False, namespace, error_msg)
+        
+        # Restore original trace function after execution
+        sys.settrace(original_trace)
+        
+        # ==================== LAYER 3: OUTPUT GUARDIAN (POST-EXECUTION SCAN) ====================
+        # Large output detection (>1MB total size)
+        total_output_size = sum(sys.getsizeof(str(v)) for v in namespace.values() if v is not None)
+        if total_output_size > 1_000_000:  # 1MB threshold
+            self._log(f"⚠️ OUTPUT GUARDIAN: Large output detected ({total_output_size/1024:.0f}KB) - log bombing risk?", "SECURITY")
+        
+        # Secret leakage patterns (non-blocking scan)
+        secret_patterns = [
+            r'(?i)password\s*[=:]\s*[\'"][^\'"]{8,}[\'"]',
+            r'(?i)api[_-]?key\s*[=:]\s*[\'"][a-z0-9]{20,}[\'"]',
+            r'(?i)token\s*[=:]\s*[\'"][a-z0-9._-]{30,}[\'"]',
+            r'(?i)secret\s*[=:]\s*[\'"][^\'"]{15,}[\'"]'
+        ]
+        
+        for key, value in namespace.items():
+            if key.startswith('_') or key in ('__builtins__',):
+                continue
+            str_val = str(value)[:2000]  # Limit scan to first 2KB
+            for pattern in secret_patterns:
+                if re.search(pattern, str_val):
+                    self._log(f"⚠️ OUTPUT GUARDIAN: Potential secret leakage in '{key}' variable", "SECURITY")
+                    break
+        
+        # Report behavioral warnings AFTER execution completes
+        if behavioral_flags['file_access']:
+            self._log("⚠️ BEHAVIORAL WARNING: File access patterns detected during execution", "SECURITY")
+        if behavioral_flags['network_access']:
+            self._log("⚠️ BEHAVIORAL WARNING: Network access patterns detected during execution", "SECURITY")
+        if behavioral_flags['introspection']:
+            self._log("⚠️ BEHAVIORAL WARNING: Introspection patterns detected during execution", "SECURITY")
+        
+        # Always return success if no exception occurred (non-blocking design)
+        return (True, namespace, None)
     
     def safe_exec_file(self, file_path: str, namespace: Optional[Dict] = None) -> tuple:
         """
