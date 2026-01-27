@@ -523,3 +523,83 @@ if passlib_versions and bcrypt_versions:
 else:
     print("  Unable to determine version compatibility")
     print("  Please check package documentation")
+
+
+# ============================================================================
+# EXAMPLE 12: DEPENDENCY SHADOW LOADING - Test Code with New Versions
+# ============================================================================
+print("\n\n12. DEPENDENCY SHADOW LOADING - Automatic Fallback on Break")
+print("=" * 60)
+print("""
+Use Case: Update dependencies to newer versions safely
+- Try running code with UPDATED versions first
+- If code BREAKS: automatically fallback to STABLE versions
+- Perfect for gradually adopting new major versions
+""")
+
+loader = SafeLoader(verbose=True)
+
+# Define test code that uses a common package
+def test_with_updated_version():
+    """
+    Test function that exercises the updated dependency
+    This represents your working code that needs to work with new versions
+    """
+    import json
+    import sys
+    
+    # Simulate code using standard library
+    test_data = {"name": "SafeLoader", "version": "1.0.0"}
+    json_str = json.dumps(test_data)
+    parsed = json.loads(json_str)
+    
+    return parsed
+
+# Example 1: Successful update (test passes with updated version)
+print("\nScenario 1: Testing code with updated version (SHOULD PASS)")
+print("-" * 60)
+
+result = loader.shadow_load_with_fallback(
+    test_func=test_with_updated_version,
+    updated_packages={"json": "current"},  # json is always available
+    stable_packages={"json": "1.0"},
+)
+
+print(f"\n📊 Shadow Load Result:")
+print(f"  Success: {result['success']}")
+print(f"  Message: {result['message']}")
+print(f"  Active Versions: {result['active_versions']}")
+print(f"  Fallback Used: {result['fallback_used']}")
+
+# Example 2: Simulate a breaking change with custom function
+print("\n\nScenario 2: Testing with code that has compatibility issues")
+print("-" * 60)
+
+def test_with_breaking_change():
+    """
+    This simulates a breaking change in a new version
+    """
+    # Simulate code that breaks with certain versions
+    import sys
+    test_var = 42
+    # In a real scenario, this would use a feature that was removed/changed
+    if test_var > 100:
+        raise RuntimeError("Simulated breaking change in updated version")
+    return test_var
+
+result_breaking = loader.shadow_load_with_fallback(
+    test_func=test_with_breaking_change,
+    updated_packages={"incompatible_lib": "3.0.0"},  # Simulated
+    stable_packages={"incompatible_lib": "2.0.0"},
+)
+
+print(f"\n📊 Shadow Load Result (with breaking changes):")
+print(f"  Success: {result_breaking['success']}")
+print(f"  Message: {result_breaking['message']}")
+print(f"  Fallback Used: {result_breaking['fallback_used']}")
+print(f"  Log Entries:")
+for entry in result_breaking['log_entries']:
+    print(f"    - {entry}")
+
+print("\n" + "=" * 60)
+print("✓ Shadow Loading examples complete")
