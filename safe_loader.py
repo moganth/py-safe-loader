@@ -17,6 +17,43 @@ from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 import os
 from importlib import metadata as importlib_metadata
+import threading
+import time
+
+
+def run_with_timeout(func, args, kwargs, timeout_seconds):
+    """
+    Run a function with timeout using threading (cross-platform)
+    
+    Args:
+        func: Function to execute
+        args: Positional arguments
+        kwargs: Keyword arguments
+        timeout_seconds: Timeout in seconds
+        
+    Returns:
+        Tuple of (success, result, error_message)
+    """
+    result = [None]
+    exception = [None]
+    
+    def target():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+    
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+    
+    if thread.is_alive():
+        return False, None, f"Function exceeded {timeout_seconds}s timeout"
+    
+    if exception[0]:
+        raise exception[0]
+    
+    return True, result[0], None
 
 
 class SafeLoader:
@@ -104,49 +141,146 @@ class SafeLoader:
         
         return self.loaded_modules.copy()
     
-    def safe_execute(self, func: Callable, *args, **kwargs) -> tuple:
+    def safe_execute(self, func: Callable, *args, retries=0, timeout=None, 
+                     retry_delay=1.0, **kwargs) -> tuple:
         """
-        Safely execute any function and catch all errors
+        Safely execute any function and catch all errors with retry and timeout support
         
         Args:
             func: Function to execute
             *args: Positional arguments for the function
+            retries: Number of retry attempts (default: 0, no retries)
+            timeout: Timeout in seconds per attempt (default: None, no timeout)
+            retry_delay: Delay between retries in seconds (default: 1.0)
             **kwargs: Keyword arguments for the function
             
         Returns:
             Tuple of (success: bool, result: Any, error: str)
+            
+        Examples:
+            # Basic usage (backward compatible)
+            success, result, error = loader.safe_execute(my_func, arg1, arg2)
+            
+            # With retries
+            success, result, error = loader.safe_execute(api_call, retries=3)
+            
+            # With timeout
+            success, result, error = loader.safe_execute(slow_func, timeout=5)
+            
+            # With both
+            success, result, error = loader.safe_execute(
+                network_call, retries=3, timeout=10, retry_delay=2.0
+            )
         """
         func_name = func.__name__ if hasattr(func, '__name__') else str(func)
+        max_attempts = retries + 1
         
-        try:
-            self._log(f"Executing function: {func_name}", "INFO")
-            result = func(*args, **kwargs)
-            self._log(f"✓ {func_name} executed successfully", "SUCCESS")
+        for attempt in range(max_attempts):
+            attempt_num = attempt + 1
             
-            self.execution_history.append({
-                'function': func_name,
-                'status': 'success',
-                'timestamp': datetime.now()
-            })
+            try:
+                # Log attempt
+                if attempt == 0:
+                    self._log(f"Executing function: {func_name}", "INFO")
+                else:
+                    self._log(
+                        f"Retry {attempt}/{retries} for {func_name} (after {retry_delay}s)", 
+                        "INFO"
+                    )
+                
+                # Execute with or without timeout
+                if timeout:
+                    success, result, error = run_with_timeout(func, args, kwargs, timeout)
+                    if not success:
+                        raise TimeoutError(error)
+                    execution_result = result
+                else:
+                    execution_result = func(*args, **kwargs)
+                
+                # Success!
+                success_msg = f"✓ {func_name} executed successfully"
+                if attempt > 0:
+                    success_msg += f" (attempt {attempt_num}/{max_attempts})"
+                self._log(success_msg, "SUCCESS")
+                
+                self.execution_history.append({
+                    'function': func_name,
+                    'status': 'success',
+                    'attempts': attempt_num,
+                    'timestamp': datetime.now(),
+                    'timeout': timeout,
+                    'retries': retries
+                })
+                
+                return (True, execution_result, None)
+                
+            except TimeoutError as e:
+                error_msg = f"TimeoutError: {str(e)}"
+                
+                if attempt < retries:
+                    self._log(
+                        f"⏱ Timeout in {func_name} (attempt {attempt_num}/{max_attempts}) - "
+                        f"Retrying in {retry_delay}s...",
+                        "WARNING"
+                    )
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    self._log(
+                        f"✗ Timeout in {func_name} after {max_attempts} attempts: {error_msg}",
+                        "ERROR"
+                    )
+                    
+                    self.execution_history.append({
+                        'function': func_name,
+                        'status': 'failed',
+                        'error': error_msg,
+                        'attempts': attempt_num,
+                        'timestamp': datetime.now(),
+                        'timeout': timeout,
+                        'retries': retries,
+                        'failure_reason': 'timeout'
+                    })
+                    
+                    return (False, None, error_msg)
             
-            return (True, result, None)
-            
-        except Exception as e:
-            error_msg = f"{type(e).__name__}: {str(e)}"
-            tb = traceback.format_exc()
-            
-            self._log(f"✗ Error in {func_name}: {error_msg}", "ERROR")
-            if self.verbose:
-                self._log(f"Traceback:\n{tb}", "ERROR")
-            
-            self.execution_history.append({
-                'function': func_name,
-                'status': 'failed',
-                'error': error_msg,
-                'timestamp': datetime.now()
-            })
-            
-            return (False, None, error_msg)
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                tb = traceback.format_exc()
+                
+                if attempt < retries:
+                    self._log(
+                        f"⚠ Error in {func_name} (attempt {attempt_num}/{max_attempts}): "
+                        f"{error_msg} - Retrying in {retry_delay}s...",
+                        "WARNING"
+                    )
+                    if self.verbose:
+                        self._log(f"Traceback:\n{tb}", "WARNING")
+                    
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    self._log(
+                        f"✗ Error in {func_name} after {max_attempts} attempts: {error_msg}",
+                        "ERROR"
+                    )
+                    if self.verbose:
+                        self._log(f"Traceback:\n{tb}", "ERROR")
+                    
+                    self.execution_history.append({
+                        'function': func_name,
+                        'status': 'failed',
+                        'error': error_msg,
+                        'attempts': attempt_num,
+                        'timestamp': datetime.now(),
+                        'timeout': timeout,
+                        'retries': retries,
+                        'failure_reason': 'exception'
+                    })
+                    
+                    return (False, None, error_msg)
+        
+        return (False, None, "Unknown error occurred")
     
     def safe_exec_code(self, code: str, namespace: Optional[Dict] = None) -> tuple:
         """
@@ -558,13 +692,16 @@ def quick_load(*module_names, verbose=True) -> Dict[str, Any]:
     return loader.load_modules(list(module_names))
 
 
-def safe_run(func: Callable, *args, **kwargs) -> tuple:
+def safe_run(func: Callable, *args, retries=0, timeout=None, **kwargs) -> tuple:
     """
-    Quick function to safely run any function
+    Quick function to safely run any function with retry and timeout support
     
     Usage:
         success, result, error = safe_run(my_function, arg1, arg2)
+        success, result, error = safe_run(api_call, retries=3)
+        success, result, error = safe_run(slow_func, timeout=5)
+        success, result, error = safe_run(network_call, retries=3, timeout=10)
     """
     loader = SafeLoader(verbose=False)
-    return loader.safe_execute(func, *args, **kwargs)
+    return loader.safe_execute(func, *args, retries=retries, timeout=timeout, **kwargs)
 

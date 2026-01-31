@@ -13,6 +13,7 @@ A robust Python library for safe module loading and code execution that **never 
 
 - 🔒 **Safe Module Loading** - Import modules without crashes
 - ⚡ **Safe Function Execution** - Execute any function with automatic error catching
+- 🔄 **Retry & Timeout Mechanism** - Automatic retries and timeouts for unreliable operations
 - 📝 **Safe Code Execution** - Run code strings and files safely
 - 📊 **Detailed Logging** - Track all operations with timestamps
 - 🎯 **Context Manager Support** - Clean integration with Python's `with` statement
@@ -43,6 +44,17 @@ def risky_function(a, b):
 success, result, error = loader.safe_execute(risky_function, 10, 0)
 if not success:
     print(f"Caught error: {error}")  # Program continues!
+
+# NEW: Execute with retry and timeout
+def flaky_api_call():
+    return requests.get('https://api.example.com/data')
+
+success, result, error = loader.safe_execute(
+    flaky_api_call,
+    retries=3,      # Retry up to 3 times
+    timeout=5,      # 5 second timeout per attempt
+    retry_delay=1.0 # Wait 1 second between retries
+)
 ```
 
 **Output:**
@@ -92,6 +104,8 @@ if not success:
 ✅ **Development & debugging** - Test code safely  
 ✅ **Data pipelines** - Continue processing when steps fail  
 ✅ **Graceful degradation** - Fallback when features unavailable  
+✅ **Network operations** - Retry failed API calls and handle timeouts  
+✅ **Unreliable operations** - Automatic retry for intermittent failures  
 
 ❌ **Not for performance-critical code** - Adds overhead  
 ❌ **Not for critical dependencies** - Some failures should stop execution  
@@ -115,8 +129,7 @@ MIT License - see [LICENSE](py_safe_loader/src/py_safe_loader/LICENSE) file for 
 
 **Moganthkumar**  
 **Lokesh Gopinath K**  
-
-
+**John Samuel Meshach A** 
 ---
 
 **Made with Python 🐍 | Never crash again! 🛡️**

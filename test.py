@@ -523,3 +523,131 @@ if passlib_versions and bcrypt_versions:
 else:
     print("  Unable to determine version compatibility")
     print("  Please check package documentation")
+
+
+# ============================================================================
+# EXAMPLE 12: RETRY & TIMEOUT MECHANISM - NEW FEATURE
+# ============================================================================
+print("\n\n12. RETRY & TIMEOUT MECHANISM (NEW FEATURE)")
+print("-"*60)
+
+import time
+
+print("\n🔄 Testing Retry and Timeout functionality")
+print("=" * 60)
+
+# Test 1: Retry mechanism for flaky functions
+print("\n✓ Test 1: Retry mechanism for intermittent failures")
+print("-" * 60)
+
+attempt_counter = [0]
+
+def flaky_network_call():
+    """Simulates a network call that fails first 2 times"""
+    attempt_counter[0] += 1
+    if attempt_counter[0] < 3:
+        raise ConnectionError(f"Network timeout on attempt {attempt_counter[0]}")
+    return {"status": "success", "data": "Retrieved data"}
+
+with SafeLoader(verbose=True) as retry_loader:
+    success, result, error = retry_loader.safe_execute(
+        flaky_network_call,
+        retries=3,
+        retry_delay=0.5
+    )
+    
+    if success:
+        print(f"\n✅ Success after {attempt_counter[0]} attempts!")
+        print(f"Result: {result}")
+    else:
+        print(f"\n❌ Failed after all retries: {error}")
+
+# Test 2: Timeout mechanism for slow functions
+print("\n\n✓ Test 2: Timeout mechanism for slow operations")
+print("-" * 60)
+
+def slow_database_query():
+    """Simulates a slow database query"""
+    print("  Starting slow query (will timeout)...")
+    time.sleep(5)  # Sleeps for 5 seconds
+    return "Query result"
+
+with SafeLoader(verbose=True) as timeout_loader:
+    success, result, error = timeout_loader.safe_execute(
+        slow_database_query,
+        timeout=2  # 2 second timeout
+    )
+    
+    if not success:
+        print(f"\n✅ Timeout correctly caught: {error}")
+    else:
+        print(f"\n❌ Should have timed out!")
+
+# Test 3: Combined retry + timeout
+print("\n\n✓ Test 3: Combined retry and timeout")
+print("-" * 60)
+
+retry_timeout_counter = [0]
+
+def unreliable_api_call():
+    """Simulates an API call that's both slow and unreliable"""
+    retry_timeout_counter[0] += 1
+    print(f"  API call attempt {retry_timeout_counter[0]}...")
+    time.sleep(1.5)  # Takes 1.5 seconds
+    if retry_timeout_counter[0] < 2:
+        raise TimeoutError("API timeout")
+    return {"api_response": "success"}
+
+with SafeLoader(verbose=True) as combined_loader:
+    success, result, error = combined_loader.safe_execute(
+        unreliable_api_call,
+        retries=3,
+        timeout=3,
+        retry_delay=0.5
+    )
+    
+    if success:
+        print(f"\n✅ API call succeeded: {result}")
+    else:
+        print(f"\n⚠️ API call failed: {error}")
+
+# Test 4: Using safe_run with retry
+print("\n\n✓ Test 4: Quick safe_run with retry")
+print("-" * 60)
+
+quick_retry_counter = [0]
+
+def quick_flaky_function():
+    quick_retry_counter[0] += 1
+    if quick_retry_counter[0] < 2:
+        raise ValueError("First attempt fails")
+    return "Quick success!"
+
+success, result, error = safe_run(quick_flaky_function, retries=2)
+if success:
+    print(f"✅ safe_run with retry succeeded: {result}")
+
+# Test 5: Backward compatibility (no retry, no timeout)
+print("\n\n✓ Test 5: Backward compatibility check")
+print("-" * 60)
+
+def simple_function(x, y):
+    return x + y
+
+with SafeLoader(verbose=True) as compat_loader:
+    # Old usage still works
+    success, result, error = compat_loader.safe_execute(simple_function, 10, 20)
+    assert success == True, "Backward compatibility broken!"
+    assert result == 30, "Backward compatibility broken!"
+    print(f"\n✅ Backward compatible: {result}")
+
+print("\n" + "=" * 60)
+print("✅ ALL RETRY & TIMEOUT TESTS COMPLETED!")
+print("=" * 60)
+print("\nFeatures tested:")
+print("  ✓ Retry mechanism for intermittent failures")
+print("  ✓ Timeout mechanism for slow operations")
+print("  ✓ Combined retry + timeout")
+print("  ✓ safe_run with retry support")
+print("  ✓ Backward compatibility maintained")
+print("\n" + "=" * 60)
