@@ -197,17 +197,29 @@ class SafeLoader:
         }
         
         def trace_behavior(frame, event, arg):
-            if event == 'call':
-                func_name = frame.f_code.co_name.lower()
-                # Detect file operations (use prefix matching to avoid overly broad hits)
-                if any(func_name.startswith(kw) for kw in ['open', 'read', 'write', 'file', 'path']):
-                    behavioral_flags['file_access'] = True
-                # Detect network operations (avoid generic names like "get" and "post")
-                if any(func_name.startswith(kw) for kw in ['socket', 'connect', 'request', 'urlopen']):
-                    behavioral_flags['network_access'] = True
-                # Detect introspection (match exact known introspection helpers)
-                if func_name in {'globals', 'locals', 'dir', 'getattr', 'setattr', 'vars'}:
-                    behavioral_flags['introspection'] = True
+            """
+            Trace callback used for lightweight behavioral detection.
+            This function must never raise, to avoid breaking traced code.
+            """
+            try:
+                if event == 'call':
+                    func_code = getattr(frame, "f_code", None)
+                    func_name = ""
+                    if func_code is not None:
+                        func_name = getattr(func_code, "co_name", "") or ""
+                    func_name = str(func_name).lower()
+                    # Detect file operations
+                    if any(kw in func_name for kw in ['open', 'read', 'write', 'file', 'path']):
+                        behavioral_flags['file_access'] = True
+                    # Detect network operations
+                    if any(kw in func_name for kw in ['socket', 'connect', 'request', 'urlopen', 'get', 'post']):
+                        behavioral_flags['network_access'] = True
+                    # Detect introspection
+                    if any(kw in func_name for kw in ['globals', 'locals', 'dir', 'getattr', 'setattr', 'vars']):
+                        behavioral_flags['introspection'] = True
+            except Exception as e:
+                # Never let tracing errors affect the code being executed
+                self._log(f"Error in trace_behavior: {e}", "ERROR")
             return trace_behavior
         
         # Enable tracing before execution
