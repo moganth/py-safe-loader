@@ -255,7 +255,24 @@ class SafeLoader:
         
         # ==================== LAYER 3: OUTPUT GUARDIAN (POST-EXECUTION SCAN) ====================
         # Large output detection (>1MB total size)
-        total_output_size = sum(sys.getsizeof(str(v)) for v in namespace.values() if v is not None)
+        def _safe_size(obj, _seen=None):
+            """
+            Safely estimate the size of an object without invoking potentially
+            expensive or side-effectful __str__ implementations.
+            """
+            if _seen is None:
+                _seen = set()
+            obj_id = id(obj)
+            if obj_id in _seen:
+                return 0
+            _seen.add(obj_id)
+            try:
+                return sys.getsizeof(obj)
+            except TypeError:
+                # Fallback for objects where size cannot be determined
+                return 0
+
+        total_output_size = sum(_safe_size(v) for v in namespace.values() if v is not None)
         if total_output_size > 1_000_000:  # 1MB threshold
             self._log(f"⚠️ OUTPUT GUARDIAN: Large output detected ({total_output_size/1024:.0f}KB) - log bombing risk?", "SECURITY")
         
