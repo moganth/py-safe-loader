@@ -17,7 +17,7 @@ Three non-blocking security scanners added to safe_exec_code() that warn but nev
 |-- ------------|-------------------------------------------
 |-- Blocking? 	|-- ❌ Never blocks execution
 |-- Test Impact |-- ✅ All tests pass (warnings only)
-|-- Performance |-- <15ms overhead for typical code
+|-- Performance |-- Adds tracing overhead; impact depends on code complexity and call volume
 |-- Setup 	    |-- Zero config - works out of the box
 |-- Output 	    |-- Logs to console/file with [SECURITY] tag
 
