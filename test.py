@@ -544,18 +544,20 @@ success, ns, error = sec_loader.safe_exec_code(code1)
 status = "✅ PASS" if success and ns.get('result') == 60 else "❌ FAIL"
 print(f"{status} | Execution: {'SUCCESS' if success else 'FAILED'} | Result: {ns.get('result') if success else 'N/A'}")
 
-# TEST 12.2: Obfuscation patterns (should WARN but still execute)
-print("\n[TEST 12.2] Obfuscation patterns (base64 + excessive dunders)")
+# TEST 12.2: Obfuscation patterns (properly triggers warnings)
+print("\n[TEST 12.2] Obfuscation patterns (base64.b64decode + eval)")
 code2 = """
-data = "SGVsbG8gd29ybGQ="  # Base64 string
-x__y__z__a__b__c__d__e__f = 42  # Excessive dunder attributes
-result = 100
+import base64
+# Base64 decoding pattern (triggers obfuscation warning)
+decoded = base64.b64decode('SGVsbG8gd29ybGQ=')
+# Eval usage (triggers obfuscation warning)
+result = eval('50 + 50')
 """
 success, ns, error = sec_loader.safe_exec_code(code2)
 status = "✅ PASS" if success and ns.get('result') == 100 else "❌ FAIL"
 print(f"{status} | Execution: {'SUCCESS' if success else 'FAILED'} | Warnings: OBFUSCATION DETECTED (Not-Blocked)")
 
-# TEST 12.3: Behavioral patterns (file access via os - should WARN but execute)
+# TEST 12.3: Behavioral patterns (file access via os - triggers warning)
 print("\n[TEST 12.3] Behavioral patterns (file access via os module)")
 code3 = """
 import os
@@ -579,18 +581,21 @@ success, ns, error = sec_loader.safe_exec_code(code4)
 status = "✅ PASS" if success and ns.get('result') == 50000 else "❌ FAIL"
 print(f"{status} | Execution: {'SUCCESS' if success else 'FAILED'} | Warnings: OUTPUT GUARDIAN TRIGGERED (Not-Blocked)")
 
-# TEST 12.5: All scanners combined (should warn 3x but still execute)
+# TEST 12.5: All scanners combined (properly triggers all 3 warnings)
 print("\n[TEST 12.5] All scanners combined (obfuscation + behavior + output)")
 code5 = """
-# Obfuscation: base64 pattern
+# Obfuscation: base64 decoding + eval
 import base64
+decoded = base64.b64decode('cGFzc3dvcmQ9J3NlY3JldCc=')
+result = eval('999')
+
 # Behavior: file access
 import os
-current_dir = os.getcwd()
+_ = os.getcwd()
+
 # Output: secret pattern + large data
 password = "password='super_secret_12345'"
 big_data = '*' * 2000000  # 2MB string
-result = 999
 """
 success, ns, error = sec_loader.safe_exec_code(code5)
 status = "✅ PASS" if success and ns.get('result') == 999 else "❌ FAIL"
