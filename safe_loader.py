@@ -171,9 +171,15 @@ class SafeLoader:
             obfuscation_warnings.append("Base64/exec/eval patterns detected (potential evasion attempt)")
         
         # Excessive dunder attributes (introspection probing)
-        dunder_count = code.count('__')
-        if dunder_count > 8 and 'class' not in code and 'def' not in code:
-            obfuscation_warnings.append(f"Excessive dunder attributes ({dunder_count} occurrences) - introspection probing?")
+        # Count only actual dunder-style identifiers (e.g., __dict__, __class__)
+        dunder_matches = re.findall(r'\b__\w+__\b', code)
+        dunder_count = len(dunder_matches)
+        suspicious_dunder_threshold = 20
+        if dunder_count >= suspicious_dunder_threshold:
+            obfuscation_warnings.append(
+                f"High number of dunder attributes ({dunder_count} occurrences, "
+                f"threshold={suspicious_dunder_threshold}) - possible introspection or obfuscation"
+            )
         
         # Long obfuscated strings (hex/unicode encoding)
         if re.search(r'\\x[0-9a-f]{2}|\\u[0-9a-f]{4}', code) and len(code) < 200:
