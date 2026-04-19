@@ -533,7 +533,7 @@ print("-"*60)
 
 import time
 
-print("\n🔄 Testing Retry and Timeout functionality")
+print("\nTesting Retry and Timeout functionality")
 print("=" * 60)
 
 # Test 1: Retry mechanism for flaky functions
@@ -642,12 +642,40 @@ with SafeLoader(verbose=True) as compat_loader:
     print(f"\n✅ Backward compatible: {result}")
 
 print("\n" + "=" * 60)
-print("✅ ALL RETRY & TIMEOUT TESTS COMPLETED!")
+print("ALL RETRY & TIMEOUT TESTS COMPLETED!")
 print("=" * 60)
 print("\nFeatures tested:")
-print("  ✓ Retry mechanism for intermittent failures")
-print("  ✓ Timeout mechanism for slow operations")
-print("  ✓ Combined retry + timeout")
-print("  ✓ safe_run with retry support")
-print("  ✓ Backward compatibility maintained")
+print("  - Retry mechanism for intermittent failures")
+print("  - Timeout mechanism for slow operations")
+print("  - Combined retry + timeout")
+print("  - safe_run with retry support")
+print("  - Backward compatibility maintained")
 print("\n" + "=" * 60)
+
+
+# ============================================================================
+# EXAMPLE 13: HOT RELOAD - NEW FEATURE
+# ============================================================================
+print("\n\n13. HOT RELOAD (NEW FEATURE)")
+print("-"*60)
+
+print("Edit 'hot_config.json' while this runs...\n")
+
+with SafeLoader(verbose=True) as loader:
+
+    loader.watch_file("hot_config.json", "json")
+
+    last_seen = None
+
+    try:
+        while True:
+            config = loader.get_watched_data("hot_config.json")
+
+            if config != last_seen:
+                print("UPDATED CONFIG:", config)
+                last_seen = config
+
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\nStopped.")

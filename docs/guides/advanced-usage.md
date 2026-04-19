@@ -111,3 +111,39 @@ with SafeLoader(verbose=True, log_file='errors.log') as loader:
 
 - [Real-World Examples](../examples/)
 - [Function Reference](../reference/SafeLoader.md)
+
+## Hot Reload
+
+Watch files for changes and auto-reload them without restarting your application. Requires `pip install watchdog`.
+
+### Watch a JSON Config
+
+```python
+from safe_loader import SafeLoader
+import time
+
+with SafeLoader(verbose=True) as loader:
+    loader.watch_file("config.json", "json")
+
+    while True:
+        config = loader.get_watched_data("config.json")
+        print(config)
+        time.sleep(1)
+```
+
+Edit `config.json` while the app runs — changes are picked up automatically. If the file has errors, the old data is kept.
+
+### Watch a Python File
+
+```python
+with SafeLoader(verbose=True) as loader:
+    loader.watch_file("rules.py", "python")
+
+    ns = loader.get_watched_data("rules.py")
+    if 'get_discount' in ns:
+        print(ns['get_discount']())
+```
+
+Supported types: `json` and `python`.
+
+See [watch_file reference](../reference/watch_file.md) and [hot reload example](../examples/dynamic-hot-reload.md) for more.

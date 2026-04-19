@@ -13,12 +13,16 @@ Usage:
 import importlib
 import sys
 import traceback
+import json
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime
 import os
 from importlib import metadata as importlib_metadata
 import threading
 import time
+
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 
 def run_with_timeout(func, args, kwargs, timeout_seconds):
@@ -75,6 +79,8 @@ class SafeLoader:
         self.loaded_modules = {}
         self.failed_modules = {}
         self.execution_history = []
+        self._observers = []
+        self._watched_files = {}
         
     def _log(self, message, level="INFO"):
         """Internal logging method"""
@@ -416,6 +422,95 @@ class SafeLoader:
         
         print("="*60 + "\n")
     
+    # ============================================================================
+    # HOT RELOAD
+    # ============================================================================
+
+    def watch_file(self, file_path: str, file_type: str):
+        """
+        Watch a file for changes and auto-reload it safely.
+        
+        Args:
+            file_path (str): Path to the file to watch
+            file_type (str): Type of file - 'json' or 'python'
+            
+        Raises:
+            ValueError: If file does not exist or file_type is invalid
+        """
+        if not os.path.exists(file_path):
+            raise ValueError(f"File does not exist: {file_path}")
+
+        file_type = file_type.lower()
+        if file_type not in ("json", "python"):
+            raise ValueError("file_type must be 'json' or 'python'")
+
+        file_path = os.path.abspath(file_path)
+        directory = os.path.dirname(file_path)
+
+        handler = _SafeLoaderFileHandler(self, file_path, file_type)
+        observer = Observer()
+        observer.schedule(handler, directory, recursive=False)
+        observer.start()
+
+        self._observers.append(observer)
+        self._watched_files[file_path] = {"type": file_type, "data": None}
+
+        self._reload_file(file_path, file_type)
+        self._log(f"Started watching file: {file_path} (type={file_type})", "INFO")
+
+    def _reload_file(self, file_path: str, file_type: str):
+        """Internal method to reload a watched file."""
+        record = self._watched_files.get(file_path)
+        if not record:
+            return
+
+        self._log(f"Hot reloading: {file_path}", "INFO")
+
+        if file_type == "json":
+            try:
+                with open(file_path, "r") as f:
+                    data = json.load(f)
+                record["data"] = data
+                self._log("JSON reload success", "SUCCESS")
+            except Exception as e:
+                self._log(f"JSON reload failed, keeping old version: {e}", "ERROR")
+
+        elif file_type == "python":
+            success, namespace, error = self.safe_exec_file(file_path)
+            if success:
+                record["data"] = namespace
+                self._log("Python reload success", "SUCCESS")
+            else:
+                self._log(f"Python reload failed, keeping old version: {error}", "ERROR")
+
+    def get_watched_data(self, file_path: str) -> Any:
+        """
+        Get the latest loaded data for a watched file.
+        
+        Args:
+            file_path (str): Path to the watched file
+            
+        Returns:
+            The loaded data (dict for JSON, namespace dict for Python)
+            
+        Raises:
+            ValueError: If the file is not being watched
+        """
+        file_path = os.path.abspath(file_path)
+        record = self._watched_files.get(file_path)
+        if not record:
+            raise ValueError(f"File not being watched: {file_path}")
+        return record["data"]
+
+    def stop_watching(self):
+        """Stop all file watchers and clean up observer threads."""
+        for observer in self._observers:
+            observer.stop()
+            observer.join()
+        self._observers.clear()
+        self._watched_files.clear()
+        self._log("Stopped all file watchers", "INFO")
+
     def reset(self):
         """Reset all tracking data"""
         self.loaded_modules.clear()
@@ -434,6 +529,8 @@ class SafeLoader:
             self._log(f"Context exited with error: {exc_type.__name__}: {exc_val}", "ERROR")
         else:
             self._log("SafeLoader context completed successfully", "INFO")
+        
+        self.stop_watching()
         
         print("\n\n" + "="*60)
         print("FINAL SUMMARY - ALL OPERATIONS")
@@ -679,6 +776,19 @@ def dependency_version_checker(
                 )
     
     return {"all_satisfied": all_satisfied, "results": results}
+
+class _SafeLoaderFileHandler(FileSystemEventHandler):
+    """Internal watchdog handler that triggers hot reload on file changes."""
+
+    def __init__(self, loader: SafeLoader, file_path: str, file_type: str):
+        self.loader = loader
+        self.file_path = os.path.abspath(file_path)
+        self.file_type = file_type
+
+    def on_modified(self, event):
+        if os.path.abspath(event.src_path) == self.file_path:
+            self.loader._reload_file(self.file_path, self.file_type)
+
 
 # Convenience functions for quick use
 def quick_load(*module_names, verbose=True) -> Dict[str, Any]:
