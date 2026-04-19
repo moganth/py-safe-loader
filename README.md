@@ -132,7 +132,7 @@ MIT License - see [LICENSE](py_safe_loader/src/py_safe_loader/LICENSE) file for 
 ## 👤 Author
 
 **Moganthkumar**  
-**Nithyasri Sukumaran**
+**Nithyasri Sukumaran**  
 **Lokesh Gopinath K**  
 **John Samuel Meshach A** 
 ---
