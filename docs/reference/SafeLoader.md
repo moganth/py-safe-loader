@@ -41,3 +41,6 @@ The SafeLoader class provides the following methods:
 - [get_summary](./get_summary.md) - Get operation statistics
 - [print_summary](./print_summary.md) - Print formatted summary report
 - [reset](./reset.md) - Clear all tracking data
+- [watch_file](./watch_file.md) - Watch and hot-reload files
+- [get_watched_data](./watch_file.md#get_watched_data) - Get latest data from watched file
+- [stop_watching](./watch_file.md#stop_watching) - Stop all file watchers
